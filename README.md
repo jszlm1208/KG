@@ -1,1 +1,1 @@
-# KG
+# Knowledge Graph Embedding
