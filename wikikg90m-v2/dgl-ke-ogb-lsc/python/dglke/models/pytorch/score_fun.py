@@ -1058,7 +1058,7 @@ class OTEScore(nn.Module):
         pass
 
     def forward(self, g):
-        g.apply_edges(lambda edges: self.edge_func(edges, g.neg_head))
+        g.apply_edges(lambda edges: self.edge_func(edges))
 
     def create_neg_prepare(self, neg_head):
         def fn(rel_id, num_chunks, head, tail, gpu_id, trace=False):

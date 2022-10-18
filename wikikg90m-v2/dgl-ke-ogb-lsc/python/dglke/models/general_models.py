@@ -27,18 +27,18 @@ Graph Embedding Model
 7. SimplE
 8. OTE
 """
-from pytorch.loss import LossGenerator
-from pytorch.score_fun import *
-from pytorch.tensor_models import InferEmbedding
-from pytorch.tensor_models import ExternalEmbedding, RelationExternalEmbedding
-from pytorch.tensor_models import cuda
-from pytorch.tensor_models import reshape
-from pytorch.tensor_models import get_scalar
-from pytorch.tensor_models import norm
-from pytorch.tensor_models import get_device, get_dev
-from pytorch.tensor_models import masked_select
-from pytorch.tensor_models import abs
-from pytorch.tensor_models import logsigmoid
+from .pytorch.loss import LossGenerator
+from .pytorch.score_fun import *
+from .pytorch.tensor_models import InferEmbedding
+from .pytorch.tensor_models import ExternalEmbedding, RelationExternalEmbedding
+from .pytorch.tensor_models import cuda
+from .pytorch.tensor_models import reshape
+from .pytorch.tensor_models import get_scalar
+from .pytorch.tensor_models import norm
+from .pytorch.tensor_models import get_device, get_dev
+from .pytorch.tensor_models import masked_select
+from .pytorch.tensor_models import abs
+from .pytorch.tensor_models import logsigmoid
 import os
 import numpy as np
 import math
