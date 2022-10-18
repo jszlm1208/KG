@@ -1028,17 +1028,13 @@ class OTEScore(nn.Module):
                     1, 2).contiguous().view(rel_size)
         return rel_embeddings
 
-    def edge_func(self, edges, neg_head):
+    def edge_func(self, edges):
         heads = edges.src['emb']
         tails = edges.dst['emb']
         relations = edges.data['emb']
         # get the orth relation embedding
         relations = self.orth_rel_embedding(relations)
-        if neg_head:
-            relations = self.orth_reverse_mat(relations)
-            score_result = self.score(tails, relations, heads)
-        else:
-            score_result = self.score(heads, relations, tails)
+        score_result = self.score(heads, relations, tails)
         score_result = self.gamma - score_result
         return {'score': score_result}
 
