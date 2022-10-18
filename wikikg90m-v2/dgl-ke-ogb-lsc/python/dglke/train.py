@@ -20,9 +20,9 @@
 # only support pytorch backend
 
 from ogb.lsc import WikiKG90Mv2Dataset, WikiKG90Mv2Evaluator
-from .train_pytorch import test, test_mp
-from .train_pytorch import train, train_mp
-from .train_pytorch import load_model
+from train_pytorch import test, test_mp
+from train_pytorch import train, train_mp
+from train_pytorch import load_model
 import torch.multiprocessing as mp
 import numpy as np
 import torch
@@ -30,10 +30,10 @@ import os
 import logging
 import time
 
-from .dataloader import EvalDataset, TrainDataset, NewBidirectionalOneShotIterator
-from .dataloader import get_dataset
+from dataloader import EvalDataset, TrainDataset, NewBidirectionalOneShotIterator
+from dataloader import get_dataset
 
-from .utils import get_compatible_batch_size, save_model, CommonArgParser
+from utils import get_compatible_batch_size, save_model, CommonArgParser
 
 backend = os.environ.get('DGLBACKEND', 'pytorch')
 assert backend.lower() == 'pytorch'

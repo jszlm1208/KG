@@ -23,8 +23,8 @@ from tqdm import tqdm
 from ogb.lsc import WikiKG90Mv2Dataset, WikiKG90Mv2Evaluator
 from collections import defaultdict
 import pdb
-from .dataloader import get_dataset
-from .dataloader import EvalDataset
+from dataloader import get_dataset
+from dataloader import EvalDataset
 import dgl.backend as F
 from dgl.contrib import KVClient
 import dgl
@@ -32,9 +32,9 @@ from functools import wraps
 import time
 import logging
 import os
-from .utils import save_model, get_compatible_batch_size
-from .models import KEModel
-from .models.pytorch.tensor_models import thread_wrapped_func
+from utils import save_model, get_compatible_batch_size
+from models import KEModel
+from models.pytorch.tensor_models import thread_wrapped_func
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 import torch.optim as optim
