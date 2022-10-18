@@ -238,7 +238,7 @@ class KGDatasetWiki(KGDataset):
     '''Load a knowledge graph wikikg
     '''
 
-    def __init__(self, path, name='wikikg90m', test_mode='test-dev'):
+    def __init__(self, path,name='wikikg90m', test_mode='test-dev'):
         self.name = name
         self.dataset = WikiKG90Mv2Dataset(path)
         self.train = self.dataset.train_hrt.T

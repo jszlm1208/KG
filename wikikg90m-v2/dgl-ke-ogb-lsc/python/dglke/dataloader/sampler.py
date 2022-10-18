@@ -793,7 +793,7 @@ class EvalDataset(object):
                 new_edges['h,r->t']['t_correct_index'] = np.zeros(end-beg, dtype=np.short)
         else:
             assert False, mode
-        print (beg, end)
+        print(beg, end)
         return WikiEvalSampler(new_edges, batch_size, mode)
 
 

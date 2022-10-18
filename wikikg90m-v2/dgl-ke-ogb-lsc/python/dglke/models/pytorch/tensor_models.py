@@ -20,9 +20,11 @@
 """
 KG Sparse embedding
 """
+import math
 import os
 import numpy as np
 
+import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -436,3 +438,101 @@ class ExternalEmbedding:
         """
         file_name = os.path.join(path, name+'.npy')
         self.emb = th.Tensor(np.load(file_name))
+
+class RelationExternalEmbedding(ExternalEmbedding):
+    """Sparse Embedding for Knowledge Graph
+    It is used to store both entity embeddings and relation embeddings.
+
+    Parameters
+    ----------
+    args :
+        Global configs.
+    num : int
+        Number of embeddings.
+    dim : int
+        Embedding dimention size.
+    device : th.device
+        Device to store the embedding.
+    """
+
+    def __init__(self, args, num, dim, device, is_feat=False):
+        super(RelationExternalEmbedding, self).__init__(args, num, dim, device,
+                                                        is_feat)
+        self.ote_size = args.ote_size
+        self.scale_type = args.scale_type
+        self.use_scale = True if args.scale_type > 0 else False
+        self.dim = dim
+        self.final_dim = self.dim * (int(self.use_scale) + args.ote_size)
+        self.num = num
+        self.emb = th.empty(
+            num, self.final_dim, dtype=th.float32, device=device)
+
+    def scale_init(self):
+        if self.scale_type == 1:
+            return 1.0
+        if self.scale_type == 2:
+            return 0.0
+        raise ValueError("Scale Type %d is not supported!" % self.scale_type)
+
+    def orth_embedding(self, embeddings, eps=1e-18, do_test=True):
+        #orthogonormalizing embeddings
+        #embeddings: num_emb X ote_size X (num_elem + (1 or 0))
+        num_emb = embeddings.size(0)
+        assert embeddings.size(1) == self.ote_size
+        assert embeddings.size(2) == (self.ote_size +
+                                      (1 if self.use_scale else 0))
+        if self.use_scale:
+            emb_scale = embeddings[:, :, -1]
+            embeddings = embeddings[:, :, :self.ote_size]
+
+        u = [embeddings[:, 0]]
+        uu = [0] * self.ote_size
+        uu[0] = (u[0] * u[0]).sum(dim=-1)
+        if do_test and (uu[0] < eps).sum() > 1:
+            return None
+        u_d = embeddings[:, 1:]
+        for i in range(1, self.ote_size):
+            u_d = u_d - u[-1].unsqueeze(dim=1) * (
+                (embeddings[:, i:] * u[i - 1].unsqueeze(dim=1)).sum(
+                    dim=-1) / uu[i - 1].unsqueeze(dim=1)).unsqueeze(-1)
+            u_i = u_d[:, 0]
+            u_d = u_d[:, 1:]
+            uu[i] = (u_i * u_i).sum(dim=-1)
+            if do_test and (uu[i] < eps).sum() > 1:
+                return None
+            u.append(u_i)
+
+        u = torch.stack(u, dim=1)  #num_emb X ote_size X num_elem
+        u_norm = u.norm(dim=-1, keepdim=True)
+        u = u / u_norm
+        if self.use_scale:
+            u = torch.cat((u, emb_scale.unsqueeze(-1)), dim=-1)
+        return u
+
+    def orth_rel_embedding(self):
+        rel_emb_size = self.emb.size()
+        ote_size = self.ote_size
+        scale_dim = 1 if self.use_scale else 0
+        rel_embedding = self.emb.view(-1, ote_size, ote_size + scale_dim)
+        rel_embedding = self.orth_embedding(rel_embedding).view(rel_emb_size)
+        return rel_embedding
+
+    def init(self, emb_init):
+        """Initializing the embeddings.
+
+        Parameters
+        ----------
+        emb_init : float
+            The intial embedding range should be [-emb_init, emb_init].
+        """
+        init_range = 1. / math.sqrt(self.final_dim)
+        INIT.uniform_(self.emb, a=-init_range, b=init_range)
+        if self.use_scale:
+            self.emb.data.view(
+                -1, self.ote_size +
+                1)[:, -1] = self.scale_init()  #start with no scale
+        rel_emb_data = self.orth_rel_embedding()
+        self.emb.data.copy_(
+            rel_emb_data.view(-1, self.dim * (int(self.use_scale) +
+                                              self.ote_size)))
+

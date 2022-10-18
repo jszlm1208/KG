@@ -25,19 +25,20 @@ Graph Embedding Model
 5. ComplEx
 6. RotatE
 7. SimplE
+8. OTE
 """
-from .pytorch.loss import LossGenerator
-from .pytorch.score_fun import *
-from .pytorch.tensor_models import InferEmbedding
-from .pytorch.tensor_models import ExternalEmbedding
-from .pytorch.tensor_models import cuda
-from .pytorch.tensor_models import reshape
-from .pytorch.tensor_models import get_scalar
-from .pytorch.tensor_models import norm
-from .pytorch.tensor_models import get_device, get_dev
-from .pytorch.tensor_models import masked_select
-from .pytorch.tensor_models import abs
-from .pytorch.tensor_models import logsigmoid
+from pytorch.loss import LossGenerator
+from pytorch.score_fun import *
+from pytorch.tensor_models import InferEmbedding
+from pytorch.tensor_models import ExternalEmbedding, RelationExternalEmbedding
+from pytorch.tensor_models import cuda
+from pytorch.tensor_models import reshape
+from pytorch.tensor_models import get_scalar
+from pytorch.tensor_models import norm
+from pytorch.tensor_models import get_device, get_dev
+from pytorch.tensor_models import masked_select
+from pytorch.tensor_models import abs
+from pytorch.tensor_models import logsigmoid
 import os
 import numpy as np
 import math
@@ -84,6 +85,8 @@ class InferModel(object):
             self.score_func = RotatEScore(gamma, emb_init)
         elif model_name == 'SimplE':
             self.score_func = SimplEScore()
+        elif model_name == "OTE":
+            self.score_func = OTEScore()
 
     def load_emb(self, path, dataset):
         """Load the model.
@@ -179,17 +182,28 @@ class MLP(torch.nn.Module):
         self.transform_r_net = torch.nn.Linear(input_relation_dim, relation_dim)
         self.reset_parameters()
 
+        self.input_relation_dim = input_relation_dim
+        self.relation_dim = relation_dim
+
     def embed_entity(self, embeddings):
         # print("embedding", embeddings.device)
         # print("e_net", self.transform_e_net.weight.device)
         return self.transform_e_net(embeddings)
 
-    def embed_relation(self, embeddings):
+    def embed_relation(self, embeddings, skip=False):
         return self.transform_r_net(embeddings)
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.transform_r_net.weight)
         nn.init.xavier_uniform_(self.transform_e_net.weight)
+    
+    def load_parameters(self, model_path):
+        model_dict = torch.load(
+            model_path,
+            map_location=torch.device('cpu'))["transform_state_dict"]
+        for key, value in model_dict.items():
+            model_dict[key] = value.cpu()
+        self.load_state_dict(model_dict)
 
 
 class KEModel(object):
@@ -267,7 +281,20 @@ class KEModel(object):
             rel_dim = relation_dim
 
         self.use_mlp = self.encoder_model_name in ['concat', 'roberta', 'concat_v1']
+        self.use_scale = True if args.scale_type > 0 else False
         if self.encoder_model_name == 'concat':
+            if model_name == "OTE":
+                self.transform_net = MLP(
+                    entity_dim + ent_feat_dim, entity_dim,
+                    (args.ote_size + int(self.use_scale)
+                     ) * relation_dim + rel_feat_dim,
+                    (args.ote_size + int(self.use_scale)) * relation_dim)
+            else:
+                self.transform_net = MLP(entity_dim + ent_feat_dim, entity_dim,
+                                         relation_dim + rel_feat_dim,
+                                         relation_dim)
+            # self.transform_e_net = torch.nn.Linear(entity_dim, entity_dim)
+            # self.transform_r_net = torch.nn.Linear(relation_dim, relation_dim)
             self.transform_net = MLP(entity_dim+ent_feat_dim, entity_dim,
                                      relation_dim+rel_feat_dim, relation_dim)
         elif self.encoder_model_name == 'concat_v1':
@@ -283,8 +310,14 @@ class KEModel(object):
         assert not self.strict_rel_part and not self.soft_rel_part
         if not self.strict_rel_part and not self.soft_rel_part:
             if self.encoder_model_name in ['shallow', 'concat', 'concat_v1']:
-                self.relation_emb = ExternalEmbedding(args, n_relations, rel_dim,
-                                                      F.cpu() if args.mix_cpu_gpu else device)
+                if model_name == "OTE":
+                    self.relation_emb = RelationExternalEmbedding(
+                        args, n_relations, rel_dim,
+                        F.cpu() if args.mix_cpu_gpu else device)
+                else:
+                    self.relation_emb = ExternalEmbedding(
+                        args, n_relations, rel_dim,
+                        F.cpu() if args.mix_cpu_gpu else device)
             if self.encoder_model_name in ['roberta', 'concat', 'concat_v1']:
                 self.relation_feat = ExternalEmbedding(args, n_relations, rel_feat_dim,
                                                        F.cpu() if args.mix_cpu_gpu else device, is_feat=True)
@@ -314,6 +347,9 @@ class KEModel(object):
             self.score_func = SimplEScore()
         elif model_name == 'PairRE':
             self.score_func = PairREScore(gamma)
+        elif model_name == "OTE":
+            self.score_func = OTEScore(args.gamma, args.ote_size,
+                                       args.scale_type)
 
         self.model_name = model_name
         self.head_neg_score = self.score_func.create_neg(True)

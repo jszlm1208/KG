@@ -210,7 +210,7 @@ class CommonArgParser(argparse.ArgumentParser):
         self.add_argument('--model_name', default='TransE',
                           choices=['TransE', 'TransE_l1', 'TransE_l2', 'TransR',
                                    'RESCAL', 'DistMult', 'ComplEx', 'RotatE',
-                                   'SimplE', 'PairRE', 'PairRotatE'],
+                                   'SimplE', 'PairRE', 'PairRotatE','OTE'],
                           help='The models provided by DGL-KE.')
         self.add_argument('--data_path', type=str, default='data',
                           help='The path of the directory where DGL-KE loads knowledge graph data.')
@@ -306,3 +306,5 @@ class CommonArgParser(argparse.ArgumentParser):
                           help='Enable low rank approximation for entity embeddings.')
         self.add_argument('--LRE_rank', type=int, default=200,
                           help='Rank of the two low-rank matrixs for approximating entitiy embedding matrix')
+        self.add_argument('--scale_type', type=int, default=2)
+        self.add_argument('--ote_size', type=int, default=20)

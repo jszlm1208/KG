@@ -17,6 +17,7 @@
 # limitations under the License.
 #
 
+import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as functional
@@ -861,5 +862,235 @@ class PairREScore(nn.Module):
                 score = self.gamma - th.norm(heads_part-tails_part, p=1, dim=-1)
 
                 return score
+
+            return fn
+class OTEScore(nn.Module):
+    def __init__(self, gamma, num_elem, scale_type=0):
+        super(OTEScore, self).__init__()
+        self.gamma = gamma
+        self.num_elem = num_elem
+        self.scale_type = scale_type
+
+    def forward_rel_index(self, inputs, inputs_rel, rel_idx, eps=1e-6):
+        #inputs: * X num_dim, where num_dim % num_elem == 0
+        inputs_size = inputs.size()
+        #assert inputs_size[:-1] == inputs_rel.size()[:-1]
+        num_dim = inputs.size(-1)
+
+        inputs = inputs.view(-1, 1, self.num_elem)
+        if self.use_scale:
+            rel_size = inputs_rel.size()
+            rel = inputs_rel.view(-1, self.num_elem, self.num_elem + 1)
+            scale = self.get_scale(rel[:, :, self.num_elem:])
+            scale = scale / scale.norm(dim=-1, keepdim=True)
+            rel = rel[:, :, :self.num_elem] * scale
+            rel = rel.view(rel_size[0], -1, self.num_elem,
+                           self.num_elem).index_select(0, rel_idx)
+            rel = rel.view(-1, self.num_elem, self.num_elem)
+            outputs = torch.bmm(inputs, rel)
+        else:
+            rel = inputs_rel.index_select(0, rel_idx)
+            rel = rel.view(-1, self.num_elem, self.num_elem)
+            outputs = torch.bmm(inputs, rel)
+        return outputs.view(inputs_size)
+
+    @property
+    def use_scale(self):
+        return self.scale_type > 0
+
+    def score(self, inputs, inputs_rel, inputs_last):
+        inputs_size = inputs.size()
+        assert inputs_size[:-1] == inputs_rel.size()[:-1]
+        num_dim = inputs.size(-1)
+        inputs = inputs.view(-1, 1, self.num_elem)
+        if self.use_scale:
+            rel = inputs_rel.view(-1, self.num_elem, self.num_elem + 1)
+            scale = self.get_scale(rel[:, :, self.num_elem:])
+            scale = scale / scale.norm(dim=-1, keepdim=True)
+            rel_scale = rel[:, :, :self.num_elem] * scale
+            outputs = torch.bmm(inputs, rel_scale)
+        else:
+            rel = inputs_rel.view(-1, self.num_elem, self.num_elem)
+            outputs = torch.bmm(inputs, rel)
+        outputs = outputs.view(inputs_size)
+        outputs = outputs - inputs_last
+        outputs_size = outputs.size()
+        num_dim = outputs.size(-1)
+        outputs = outputs.view(-1, self.num_elem)
+        scores = outputs.norm(dim=-1).view(-1, num_dim // self.num_elem).sum(
+            dim=-1).view(outputs_size[:-1])
+        return scores
+
+    def neg_score(self, inputs, inputs_rel, inputs_last, neg_sample_size,
+                  chunk_size):
+        inputs_size = inputs.size()
+        assert inputs_size[:-1] == inputs_rel.size()[:-1]
+        num_dim = inputs.size(-1)
+        inputs = inputs.view(-1, 1, self.num_elem)
+        if self.use_scale:
+            rel = inputs_rel.view(-1, self.num_elem, self.num_elem + 1)
+            scale = self.get_scale(rel[:, :, self.num_elem:])
+            scale = scale / scale.norm(dim=-1, keepdim=True)
+            rel_scale = rel[:, :, :self.num_elem] * scale
+            outputs = torch.bmm(inputs, rel_scale)
+        else:
+            rel = inputs_rel.view(-1, self.num_elem, self.num_elem)
+            outputs = torch.bmm(inputs, rel)
+        outputs = outputs.view(-1, chunk_size, 1, inputs_size[-1])
+        inputs_last = inputs_last.view(-1, 1, neg_sample_size, inputs_size[-1])
+        outputs = outputs - inputs_last
+        outputs_size = outputs.size()
+        num_dim = outputs.size(-1)
+        outputs = outputs.view(-1, num_dim).view(-1, num_dim // self.num_elem,
+                                                 self.num_elem)
+        outputs = outputs.view(-1, self.num_elem)
+        scores = outputs.norm(dim=-1).view(-1, num_dim // self.num_elem).sum(
+            dim=-1).view(outputs_size[:-1])
+        return scores
+
+    def get_scale(self, scale):
+        if self.scale_type == 1:
+            return scale.abs()
+        if self.scale_type == 2:
+            return scale.exp()
+        raise ValueError("Scale Type %d is not supported!" % self.scale_type)
+
+    def reverse_scale(self, scale, eps=1e-9):
+        if self.scale_type == 1:
+            return 1 / (abs(scale) + eps)
+        if self.scale_type == 2:
+            return -scale
+        raise ValueError("Scale Type %d is not supported!" % self.scale_type)
+
+    def scale_init(self):
+        if self.scale_type == 1:
+            return 1.0
+        if self.scale_type == 2:
+            return 0.0
+        raise ValueError("Scale Type %d is not supported!" % self.scale_type)
+
+    def orth_embedding(self, embeddings, eps=1e-18, do_test=True):
+        #orthogonormalizing embeddings
+        #embeddings: num_emb X num_elem X (num_elem + (1 or 0))
+        num_emb = embeddings.size(0)
+        assert embeddings.size(1) == self.num_elem
+        assert embeddings.size(2) == (self.num_elem +
+                                      (1 if self.use_scale else 0))
+        if self.use_scale:
+            emb_scale = embeddings[:, :, -1]
+            embeddings = embeddings[:, :, :self.num_elem]
+
+        u = [embeddings[:, 0]]
+        uu = [0] * self.num_elem
+        uu[0] = (u[0] * u[0]).sum(dim=-1)
+        if do_test and (uu[0] < eps).sum() > 1:
+            return None
+        u_d = embeddings[:, 1:]
+        for i in range(1, self.num_elem):
+            u_d = u_d - u[-1].unsqueeze(dim=1) * (
+                (embeddings[:, i:] * u[i - 1].unsqueeze(dim=1)).sum(
+                    dim=-1) / uu[i - 1].unsqueeze(dim=1)).unsqueeze(-1)
+            u_i = u_d[:, 0]
+            u_d = u_d[:, 1:]
+            uu[i] = (u_i * u_i).sum(dim=-1)
+            if do_test and (uu[i] < eps).sum() > 1:
+                return None
+            u.append(u_i)
+
+        u = torch.stack(u, dim=1)  #num_emb X num_elem X num_elem
+        u_norm = u.norm(dim=-1, keepdim=True)
+        u = u / u_norm
+        if self.use_scale:
+            u = torch.cat((u, emb_scale.unsqueeze(-1)), dim=-1)
+        return u
+
+    def orth_rel_embedding(self, relation_embedding):
+        rel_emb_size = relation_embedding.size()
+        ote_size = self.num_elem
+        scale_dim = 1 if self.use_scale else 0
+        rel_embedding = relation_embedding.view(-1, ote_size,
+                                                ote_size + scale_dim)
+        rel_embedding = self.orth_embedding(rel_embedding).view(rel_emb_size)
+        return rel_embedding
+
+    def orth_reverse_mat(self, rel_embeddings):
+        rel_size = rel_embeddings.size()
+        if self.use_scale:
+            rel_emb = rel_embeddings.view(-1, self.num_elem, self.num_elem + 1)
+            rel_mat = rel_emb[:, :, :self.num_elem].contiguous().transpose(1,
+                                                                           2)
+            rel_scale = self.reverse_scale(rel_emb[:, :, self.num_elem:])
+            rel_embeddings = torch.cat((rel_mat, rel_scale),
+                                       dim=-1).view(rel_size)
+        else:
+            rel_embeddings = rel_embeddings.view(
+                -1, self.num_elem, self.num_elem).transpose(
+                    1, 2).contiguous().view(rel_size)
+        return rel_embeddings
+
+    def edge_func(self, edges, neg_head):
+        heads = edges.src['emb']
+        tails = edges.dst['emb']
+        relations = edges.data['emb']
+        # get the orth relation embedding
+        relations = self.orth_rel_embedding(relations)
+        if neg_head:
+            relations = self.orth_reverse_mat(relations)
+            score_result = self.score(tails, relations, heads)
+        else:
+            score_result = self.score(heads, relations, tails)
+        score_result = self.gamma - score_result
+        return {'score': score_result}
+
+    def infer(self, head_emb, rel_emb, tail_emb):
+        pass
+
+    def update(self, gpu_id=-1):
+        pass
+
+    def reset_parameters(self):
+        pass
+
+    def save(self, path, name):
+        pass
+
+    def load(self, path, name):
+        pass
+
+    def forward(self, g):
+        g.apply_edges(lambda edges: self.edge_func(edges, g.neg_head))
+
+    def create_neg_prepare(self, neg_head):
+        def fn(rel_id, num_chunks, head, tail, gpu_id, trace=False):
+            return head, tail
+
+        return fn
+
+    def prepare(self, g, gpu_id, trace=False):
+        pass
+
+    def create_neg(self, neg_head):
+        gamma = self.gamma
+        if neg_head:
+
+            def fn(heads, relations, tails, num_chunks, chunk_size,
+                   neg_sample_size):
+                relations = self.orth_rel_embedding(relations)
+                relations = self.orth_reverse_mat(relations)
+                score_result = self.neg_score(tails, relations, heads,
+                                              neg_sample_size, chunk_size)
+                score_result = gamma - score_result
+                return score_result
+
+            return fn
+        else:
+
+            def fn(heads, relations, tails, num_chunks, chunk_size,
+                   neg_sample_size):
+                relations = self.orth_rel_embedding(relations)
+                score_result = self.neg_score(heads, relations, tails,
+                                              neg_sample_size, chunk_size)
+                score_result = gamma - score_result
+                return score_result
 
             return fn

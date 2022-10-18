@@ -43,6 +43,7 @@ def set_global_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
+    torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
 
 
@@ -116,7 +117,7 @@ def main():
     args = ArgParser().parse_args()
     prepare_save_path(args)
     assert args.dataset == 'wikikg90m'
-    #args.neg_sample_size_eval = 1000
+    args.neg_sample_size_eval = 1000
     set_global_seed(args.seed)
 
     init_time_start = time.time()

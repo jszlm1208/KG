@@ -62,6 +62,10 @@ def load_model(args, n_entities, n_relations, ent_feat_dim, rel_feat_dim, ckpt=N
 def load_model_from_checkpoint(args, n_entities, n_relations, ckpt_path, ent_feat_dim, rel_feat_dim):
     model = load_model(args, n_entities, n_relations, ent_feat_dim, rel_feat_dim)
     model.load_emb(ckpt_path, args.dataset)
+    print("load embedding done.")
+    model.transform_net.load_parameters(
+        os.path.join(ckpt_path, args.dataset + "_" + args.model_name + "_mlp"))
+    print("load mlp parameters done.")
     return model
 
 
@@ -94,6 +98,8 @@ def train(args, model, train_sampler, valid_samplers=None, test_samplers=None, r
     update_time = 0
     forward_time = 0
     backward_time = 0
+    best_valid_mrr = -1
+    best_valid_idx = -1
     for step in range(0, args.max_step):
         # print("start step", step)
         start1 = time.time()
@@ -126,7 +132,7 @@ def train(args, model, train_sampler, valid_samplers=None, test_samplers=None, r
 
         # force synchronize embedding across processes every X steps
         if args.force_sync_interval > 0 and \
-                (step + 1) % args.force_sync_interval == 0:
+                (step + 1) % args.force_sync_interval == 0 and (barrier is not None):
             barrier.wait()
 
         if (step + 1) % args.log_interval == 0:
