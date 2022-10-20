@@ -864,6 +864,7 @@ class PairREScore(nn.Module):
                 return score
 
             return fn
+
 class OTEScore(nn.Module):
     def __init__(self, gamma, num_elem, scale_type=0):
         super(OTEScore, self).__init__()
@@ -1028,13 +1029,17 @@ class OTEScore(nn.Module):
                     1, 2).contiguous().view(rel_size)
         return rel_embeddings
 
-    def edge_func(self, edges):
+    def edge_func(self, edges, neg_head):
         heads = edges.src['emb']
         tails = edges.dst['emb']
         relations = edges.data['emb']
         # get the orth relation embedding
         relations = self.orth_rel_embedding(relations)
-        score_result = self.score(heads, relations, tails)
+        if neg_head:
+            relations = self.orth_reverse_mat(relations)
+            score_result = self.score(tails, relations, heads)
+        else:
+            score_result = self.score(heads, relations, tails)
         score_result = self.gamma - score_result
         return {'score': score_result}
 
@@ -1053,8 +1058,8 @@ class OTEScore(nn.Module):
     def load(self, path, name):
         pass
 
-    def forward(self, g):
-        g.apply_edges(lambda edges: self.edge_func(edges))
+    def forward(self, g, neg_head):
+        g.apply_edges(lambda edges: self.edge_func(edges, neg_head))
 
     def create_neg_prepare(self, neg_head):
         def fn(rel_id, num_chunks, head, tail, gpu_id, trace=False):
