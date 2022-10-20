@@ -976,3 +976,20 @@ class GNNModel(BasicGEModel):
         relation_emb_file = 'relation.npy'
         self._entity_emb.load(model_path, entity_emb_file)
         self._relation_emb.load(model_path, relation_emb_file)
+
+class OTEModel(KGEModel):
+    """ RotatE Model
+    """
+    def __init__(self, device, gamma):
+        model_name = 'OTE'
+        self._gamma = gamma
+        score_func = OTEScore(gamma, 0)
+        super(OTEModel, self).__init__(device, model_name, score_func)
+
+    def load(self, model_path):
+        super(OTEModel, self).load(model_path)
+        # retrive emb_init, which is used in scoring func
+        entity_dim = self._entity_emb.emb.shape[1]
+        hidden_dim = entity_dim // 2
+        emb_init = (self._gamma + EMB_INIT_EPS) / hidden_dim
+        self._score_func.emb_init = emb_init
